@@ -1,5 +1,7 @@
 # ESP32-S3 NES Emulator (Optimised for china 2.8 320x240 ST7789 driver)
 
+Updated by myself with help of gooele Ai to fix the sound. also added touch to the main menu.
+
 This repo based on esp nofrendo. But I really too much work and upgraded it
 Original Repo : https://github.com/espressif/esp32-nesemu/tree/master/components/nofrendo
 
