@@ -1,0 +1,332 @@
+/**
+ * ESP32-S3 Hardware Test – Adafruit ST7789 + SD + XPT2046
+ * Shared Hardware SPI (SCK=15, MISO=17, MOSI=7)
+ */
+
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7789.h>
+#include <SD.h>
+#include <SPI.h>
+#include <XPT2046_Touchscreen.h>
+
+// ─── Pin Map ─────────────────────────────────────────────────────────────────
+#define BTN_UP     44
+#define BTN_DOWN    1
+#define BTN_LEFT   43
+#define BTN_RIGHT   2
+#define BTN_START  41
+#define BTN_SELECT 42
+#define BTN_A      40
+#define BTN_B      39
+#define BTN_X      47
+#define BTN_Y      21
+
+#define PIN_MOSI 7
+#define PIN_SCK 15
+#define PIN_MISO 17
+
+#define TFT_CS 4
+#define TFT_DC 6
+#define TFT_RST 5
+#define LED_BL 16
+
+#define SD_CS 18
+
+// ─── Touch SPI Pins (Isolated from SD card) ──────────────────────────────────
+#define TOUCH_SCK 11  // T_CLK
+#define TOUCH_MISO 20 // T_DO
+#define TOUCH_MOSI 13 // T_DIN
+
+#define T_CS 12  // T_CS
+#define T_IRQ 45 // T_IRQ
+
+// ─── Objects ─────────────────────────────────────────────────────────────────
+Adafruit_ST7789 tft = Adafruit_ST7789(&SPI, TFT_CS, TFT_DC, TFT_RST);
+
+SPIClass touchSpi(HSPI); // Completely separate SPI bus for Touch
+XPT2046_Touchscreen touch(T_CS, T_IRQ);
+
+// ─── Colours ─────────────────────────────────────────────────────────────────
+// Using color565 to prevent the ESP32 byte-endianness from flipping green into
+// pink
+#define COL_BG tft.color565(0, 0, 0)
+#define COL_TXT ST77XX_WHITE
+#define COL_OK ST77XX_GREEN
+#define COL_FAIL ST77XX_RED
+#define COL_WAIT ST77XX_YELLOW
+
+// ─── State ───────────────────────────────────────────────────────────────────
+bool sdOk = false;
+String sdInfo = "--";
+char tchInf[32] = "waiting...";
+String touchCoords = "Tap screen to test";
+
+// ─── Draw UI ─────────────────────────────────────────────────────────────────
+void drawUI(bool firstRun = true, bool clearScreen = true) {
+  if (firstRun) {
+    if (clearScreen) {
+      tft.fillRect(0, 0, 320, 240, COL_BG);
+    }
+
+    // Header
+    tft.fillRect(0, 0, 320, 26, ST77XX_CYAN);
+    tft.setTextColor(COL_BG);
+    tft.setTextSize(2);
+    tft.setCursor(6, 6);
+    tft.print("ESP32-S3 HW Test");
+
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_WHITE);
+
+    // Display Info
+    tft.setCursor(10, 40);
+    tft.setTextColor(COL_TXT);
+    tft.print("DISPLAY: ");
+    tft.setTextColor(COL_OK);
+    tft.print("OK (ST7789V 320x240, MADCTL 0xF8)");
+
+    // SD Info
+    tft.setCursor(10, 70);
+    tft.setTextColor(COL_TXT);
+    tft.print("SD CARD: ");
+    tft.setTextColor(sdOk ? COL_OK : COL_FAIL);
+    tft.print(sdOk ? "Mounted" : "FAILED / Not found");
+
+    tft.setCursor(10, 90);
+    tft.setTextColor(COL_TXT);
+    tft.print("  Size:  ");
+    tft.print(sdInfo.c_str());
+    
+    // Buttons Info Header
+    tft.setCursor(10, 120);
+    tft.setTextColor(COL_TXT);
+    tft.print("BUTTONS: ");
+
+    // Touch Info Header
+    tft.setCursor(10, 150);
+    tft.setTextColor(COL_TXT);
+    tft.print("TOUCH:   ");
+
+    // Buttons
+    tft.fillRect(30, 190, 100, 40, ST77XX_RED);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setTextSize(2);
+    tft.setCursor(65, 203);
+    tft.print("RED");
+
+    tft.fillRect(190, 190, 100, 40, ST77XX_BLUE);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setTextSize(2);
+    tft.setCursor(215, 203);
+    tft.print("BLUE");
+  }
+
+  // Live Touch Text Updater
+  tft.setTextSize(1);
+  tft.setCursor(80, 150);
+  tft.setTextColor(COL_WAIT, COL_BG);
+  tft.print(tchInf);
+  tft.print("        "); // Extra spaces erase old text
+
+  tft.setCursor(10, 170);
+  tft.setTextColor(tchInf[0] == 'T' ? COL_OK : COL_WAIT, COL_BG);
+
+  if (tchInf[0] == 'T') {
+    tft.print(touchCoords); 
+  } else {
+    tft.print("Tap screen to test                   ");
+  }
+}
+
+// Draw just the button text (to avoid flickering)
+void drawBtns(const char* label) {
+  tft.setTextSize(1);
+  tft.setCursor(80, 120);
+  tft.setTextColor(ST77XX_CYAN, COL_BG);
+  tft.print(label);
+  tft.print("        "); // Erase old text
+}
+
+// ─── SD Init ─────────────────────────────────────────────────────────────────
+void initSD() {
+  if (SD.begin(SD_CS, SPI, 4000000)) {
+    sdOk = true;
+    uint32_t tot = (uint32_t)(SD.cardSize() / 1048576ULL);
+    uint32_t usd = (uint32_t)(SD.usedBytes() / 1048576ULL);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%u MB  (%u MB used)", tot, usd);
+    sdInfo = String(buf);
+    Serial.printf("[SD ] OK %s\n", buf);
+  } else {
+    sdOk = false;
+    sdInfo = "check CS=18 or wiring";
+    Serial.println("[SD ] FAILED");
+  }
+}
+
+// ─── Setup
+// ────────────────────────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  delay(400);
+
+  // Button setup
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_LEFT, INPUT_PULLUP);
+  pinMode(BTN_RIGHT, INPUT_PULLUP);
+  pinMode(BTN_START, INPUT_PULLUP);
+  pinMode(BTN_SELECT, INPUT_PULLUP);
+  pinMode(BTN_A, INPUT_PULLUP);
+  pinMode(BTN_B, INPUT_PULLUP);
+  pinMode(BTN_X, INPUT_PULLUP);
+  pinMode(BTN_Y, INPUT_PULLUP);
+
+  // Stop phantom SPI selections & float inputs
+  pinMode(TFT_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+  pinMode(T_CS, OUTPUT);
+  digitalWrite(T_CS, HIGH);
+  pinMode(T_IRQ, INPUT_PULLUP);
+
+  // Backlight
+  pinMode(LED_BL, OUTPUT);
+  digitalWrite(LED_BL, HIGH);
+
+  // Start Hardware SPI
+  SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, -1);
+
+  // LCD Init
+  tft.init(240, 320);
+
+  uint8_t madctl = 0xF8;
+  tft.sendCommand(ST77XX_MADCTL, &madctl, 1);
+  tft.invertDisplay(false); // Invert colors back
+  tft.setRotation(1); 
+  tft.sendCommand(ST77XX_MADCTL, &madctl, 1);
+
+  // SD Init
+  initSD();
+
+  // Touch Init (Isolated SPI bus)
+  touchSpi.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, -1);
+  touch.begin(touchSpi);
+  touch.setRotation(1);
+
+  drawUI(true); // Full draw first time
+}
+
+// ─── Loop
+// ─────────────────────────────────────────────────────────────────────
+static uint32_t tLast = 0;
+static uint32_t sdLast = 0;
+static int16_t lastCx = -1;
+static int16_t lastCy = -1;
+
+void loop() {
+  // Read Buttons
+  static String lastBtn = "";
+  String btn = "none";
+  
+  if (digitalRead(BTN_UP) == LOW) btn = "UP";
+  else if (digitalRead(BTN_DOWN) == LOW) btn = "DOWN";
+  else if (digitalRead(BTN_LEFT) == LOW) btn = "LEFT";
+  else if (digitalRead(BTN_RIGHT) == LOW) btn = "RIGHT";
+  else if (digitalRead(BTN_A) == LOW) btn = "A";
+  else if (digitalRead(BTN_B) == LOW) btn = "B";
+  else if (digitalRead(BTN_X) == LOW) btn = "X";
+  else if (digitalRead(BTN_Y) == LOW) btn = "Y";
+  else if (digitalRead(BTN_START) == LOW) btn = "START";
+  else if (digitalRead(BTN_SELECT) == LOW) btn = "SELECT";
+  
+  if (btn != lastBtn) {
+    drawBtns(btn.c_str());
+    lastBtn = btn;
+  }
+
+  // Read touch
+  if (touch.touched()) {
+    TS_Point p = touch.getPoint();
+
+    // Ignore invalid readings caused by shared SPI conflict
+    if (p.z > 400 && p.z < 4000 && p.x < 4000 && p.y < 4000) {
+      if (millis() - tLast > 80) {
+        tLast = millis();
+
+        // Basic scaling to screen coords (inverted both ways by swapping
+        // max/min raw bounds)
+        int16_t sx = map(p.x, 3750, 190, 0, 320);
+        int16_t sy = map(p.y, 3750, 219, 0, 240);
+        sx = constrain(sx, 0, 320);
+        sy = constrain(sy, 0, 240);
+
+        char buf[48];
+        snprintf(buf, sizeof(buf), "X=%-3d Y=%-3d  raw(%d,%d)", sx, sy, p.x,
+                 p.y);
+        touchCoords = String(buf); // Save to dedicated string!
+        strlcpy(tchInf, "Tapped!", sizeof(tchInf));
+
+        drawUI(false); // Only update partial text line
+
+        // Erase old circle if it exists to prevent creating a solid trail
+        if (lastCx >= 0 && lastCy >= 0) {
+          tft.fillCircle(lastCx, lastCy, 5, COL_BG);
+        }
+
+        // Draw new circle at current touch
+        tft.fillCircle(sx, sy, 5, ST77XX_RED);
+        lastCx = sx;
+        lastCy = sy;
+
+        // Simple button hittest (re-draws just the button box during flash)
+        if (sx >= 30 && sx <= 130 && sy >= 190 && sy <= 230) {
+          tft.fillRect(30, 190, 100, 40, ST77XX_WHITE);
+          delay(150);
+          tft.fillRect(30, 190, 100, 40, ST77XX_RED);
+          tft.setTextColor(ST77XX_WHITE);
+          tft.setTextSize(2);
+          tft.setCursor(65, 203);
+          tft.print("RED");
+        }
+        if (sx >= 190 && sx <= 290 && sy >= 190 && sy <= 230) {
+          tft.fillRect(190, 190, 100, 40, ST77XX_WHITE);
+          delay(150);
+          tft.fillRect(190, 190, 100, 40, ST77XX_BLUE);
+          tft.setTextColor(ST77XX_WHITE);
+          tft.setTextSize(2);
+          tft.setCursor(215, 203);
+          tft.print("BLUE");
+        }
+      }
+    }
+  } else {
+    if (millis() - tLast > 250 && tchInf[0] == 'T') {
+      strlcpy(tchInf, "Released", sizeof(tchInf));
+
+      // Clean up screen on release
+      if (lastCx >= 0 && lastCy >= 0) {
+        tft.fillCircle(lastCx, lastCy, 5, COL_BG); // Erase the circle
+        lastCx = -1;
+        lastCy = -1;
+        
+        // Redraw all text and buttons to fix up any erased pixels, 
+        // but WITHOUT clearing the screen to black so it doesn't flash!
+        drawUI(true, false); 
+        drawBtns(lastBtn.c_str()); // Redraw dynamic button text!
+      } else {
+        drawUI(false);
+      }
+    }
+  }
+
+  // SD Auto Retry
+  if (!sdOk && millis() - sdLast > 5000) {
+    sdLast = millis();
+    bool prev = sdOk;
+    initSD();
+    if (sdOk != prev)
+      drawUI(true); // Redraw entire UI if state changed
+  }
+}

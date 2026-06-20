@@ -2,43 +2,55 @@
 #define HW_CONFIG_H
 
 // Set to 1 to enable sound, 0 to disable
-#define ENABLE_SOUND 0
+#define ENABLE_SOUND 1
 
-// SD Card Pins
-#define SD_CS 21
-#define SD_SCK 40
-#define SD_MOSI 41
-#define SD_MISO 39
+// Set to 1 to enable touchscreen in the menu, 0 to disable
+#define ENABLE_TOUCH 1
 
-// I2S Audio Pins (MAX98357A or similar DAC)
-#define I2S_DO 35   // DIN on MAX98357A
-#define I2S_BCK 36  // BCLK on MAX98357A
-#define I2S_WS 37  // LRC on MAX98357A
+// --- SD Card Pins (Shared SPI) ---
+#define SD_CS        18
+#define SD_SCK       15
+#define SD_MOSI       7
+#define SD_MISO      17
 
-// TFT Display Pins (ST7789)
-#define HW_TFT_MOSI 11   // Data In
-#define HW_TFT_SCK 12    // Clock
-#define HW_TFT_CS 10     // Chip Select
-#define HW_TFT_DC 9    // Data/Command
-#define HW_TFT_RST 14     // Reset
+// --- I2S Audio Pins (Your New Layout) ---
+#define I2S_DO        9  // DIN
+#define I2S_BCK      10  // BCLK
+#define I2S_WS       14  // LRC / Word Select
+#define I2S_GAIN      3  
+#define I2S_SD        8  // Shutdown
+
+// --- TFT Display Pins (Shared SPI) ---
+#define HW_TFT_MOSI   7
+#define HW_TFT_SCK   15
+#define HW_TFT_CS     4
+#define HW_TFT_DC     6
+#define HW_TFT_RST    5
+#define LED_BL       16
 
 // ST7789 display orientation (MADCTL)
-// 0x00: normal
-// 0x60: rotate 90°
-// 0xC0: rotate 270°
-// 0xA0: rotate 180° (vertical+horizontal flip)
-// 0x20: horizontal mirror
-// 0x40: vertical mirror
-#define HW_TFT_MADCTL 0x20  // try 0x20 if text appears mirrored
+#define HW_TFT_MADCTL 0xF0 // 180-degree rotation (0x30 ^ 0xC0)
+#define HW_TFT_COL_OFFSET 0
+#define HW_TFT_ROW_OFFSET 0
 
-// Controller/Button Pins (Active LOW with internal pullup)
-#define BTN_UP 17
-#define BTN_DOWN 16
-#define BTN_LEFT 15
-#define BTN_RIGHT 7
-#define BTN_A 4
-#define BTN_B 5
-#define BTN_START 8
-#define BTN_SELECT 0
+// --- Controller Pins (Safe & Stable) ---
+#define BTN_UP       44
+#define BTN_DOWN      1
+#define BTN_LEFT     43
+#define BTN_RIGHT     2
+#define BTN_START    41
+#define BTN_SELECT   42
+#define BTN_A        40
+#define BTN_B        39
+#define BTN_X        47
+#define BTN_y        21  
+
+// --- Touch Controller (Shared SPI) ---
+#define T_CLK        11
+#define T_CS         12
+#define T_DIN        13
+#define T_DO         20
+#define T_IRQ        45
+
 
 #endif

@@ -9,6 +9,8 @@
 #define NES_DOWN 0x20
 #define NES_LEFT 0x40
 #define NES_RIGHT 0x80
+#define NES_X     0x100
+#define NES_Y     0x200
 
 void setup_controller() {
   pinMode(BTN_UP, INPUT_PULLUP);
@@ -19,6 +21,8 @@ void setup_controller() {
   pinMode(BTN_B, INPUT_PULLUP);
   pinMode(BTN_START, INPUT_PULLUP);
   pinMode(BTN_SELECT, INPUT_PULLUP);
+  pinMode(BTN_X, INPUT_PULLUP);
+  pinMode(BTN_y, INPUT_PULLUP);
 }
 
 extern "C" int IRAM_ATTR nes_get_gamepad_state() {
@@ -32,6 +36,8 @@ extern "C" int IRAM_ATTR nes_get_gamepad_state() {
   if (digitalRead(BTN_DOWN) == LOW) state |= NES_DOWN;
   if (digitalRead(BTN_LEFT) == LOW) state |= NES_LEFT;
   if (digitalRead(BTN_RIGHT) == LOW) state |= NES_RIGHT;
+  if (digitalRead(BTN_X) == LOW) state |= NES_X;
+  if (digitalRead(BTN_y) == LOW) state |= NES_Y;
 
   return state;
 }
